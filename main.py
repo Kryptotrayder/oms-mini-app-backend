@@ -17,44 +17,51 @@ print("Начало запуска main.py")
 
 app = FastAPI(title="OMS Mini App Backend")
 
+# CORS — разрешаем запросы из Mini App (Telegram WebView)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # для теста — потом можно сузить до ["https://*.vercel.app", "https://web.telegram.org"]
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+    expose_headers=["*"],
+    max_age=600,
 )
 
+# Конфиг
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    print("BOT_TOKEN не найден! Использую заглушку.")
-    BOT_TOKEN = "твой_токен_для_теста"
+    print("BOT_TOKEN не найден в переменных окружения! Бот не запустится.")
+    BOT_TOKEN = None  # не используем заглушку — пусть крашится явно
 
 SUPPORT_USERNAME = "kmdkdooo"
 
-# Google Sheets
+# Google Sheets инициализация
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 worksheet = None
 
 try:
     google_credentials_str = os.getenv("GOOGLE_CREDENTIALS")
     if not google_credentials_str:
-        raise ValueError("GOOGLE_CREDENTIALS не найдена")
+        raise ValueError("GOOGLE_CREDENTIALS не найдена в переменных окружения")
 
     google_credentials = json.loads(google_credentials_str)
     creds = ServiceAccountCredentials.from_json_keyfile_dict(google_credentials, scope)
     gc = authorize(creds)
 
-    SHEET_URL = "https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit?gid=0#gid=0/edit"  # ← ОБЯЗАТЕЛЬНО вставь свой реальный URL!
+    # ВСТАВЬ СВОЙ РЕАЛЬНЫЙ URL ТАБЛИЦЫ!
+    SHEET_URL = "https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit?gid=0#gid=0"
     spreadsheet = gc.open_by_url(SHEET_URL)
     worksheet = spreadsheet.sheet1
+
     print("Google Sheets успешно подключён")
     print(f"Название таблицы: {spreadsheet.title}")
-    print(f"Количество строк: {worksheet.row_count}")
+    print(f"Количество строк сейчас: {worksheet.row_count}")
 except Exception as e:
     print(f"Ошибка подключения к Google Sheets: {str(e)}")
     worksheet = None
 
+# Бот
 router = Router()
 
 @router.message(Command("start"))
@@ -63,7 +70,7 @@ async def start(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="Открыть анкету ОМС",
-            web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app")
+            web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app")  # твой фронтенд
         )
     ]])
 
@@ -77,6 +84,9 @@ dp = Dispatcher()
 dp.include_router(router)
 
 async def run_bot():
+    if not BOT_TOKEN:
+        print("Бот не запущен — BOT_TOKEN отсутствует")
+        return
     bot = Bot(token=BOT_TOKEN)
     print("Бот запущен, начинаем polling...")
     await dp.start_polling(bot)
@@ -106,15 +116,14 @@ async def submit(request: Request):
 
         if worksheet is None:
             print("Таблица НЕ подключена — запись пропущена")
-            return {"status": "success", "message": "Данные получены, но таблица отключена"}
-
-        worksheet.append_row(row)
-        print("Данные успешно записаны в таблицу! Строк теперь:", worksheet.row_count)
+        else:
+            worksheet.append_row(row)
+            print("Данные успешно записаны в таблицу! Строк теперь:", worksheet.row_count)
 
         return {"status": "success"}
     except Exception as e:
         print(f"Критическая ошибка в /submit: {str(e)}")
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("startup")
 async def startup():
