@@ -42,11 +42,27 @@ async def root():
 async def submit(request: Request):
     try:
         data = await request.json()
-        print("Получены данные в /submit:", data)
-        # Здесь будет запись в таблицу (пока заглушка)
-        return {"status": "success", "message": "Данные получены"}
+        print("Получены данные в /submit:", data)  # это должно появиться в логах Railway
+
+        row = [
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            data.get("userId", "unknown"),
+            data.get("username", "unknown"),
+            data.get("gender", "unknown"),
+            data.get("name", "unknown"),
+            data.get("polis", "unknown"),
+            f"{data.get('docType', 'unknown')} {data.get('docNumber', 'unknown')}",
+            data.get("phone", "unknown")
+        ]
+
+        print("Строка для записи:", row)  # проверяем, что сформировалось
+
+        worksheet.append_row(row)
+        print("Данные успешно записаны в таблицу!")
+
+        return {"status": "success"}
     except Exception as e:
-        print("Ошибка в /submit:", str(e))
+        print("Критическая ошибка в /submit:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.message(Command("start"))
@@ -83,3 +99,4 @@ if __name__ == "__main__":
     import uvicorn
     print("Запускаем uvicorn...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
