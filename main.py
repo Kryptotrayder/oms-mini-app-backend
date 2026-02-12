@@ -1,84 +1,72 @@
-import json
 import os
-from datetime import datetime
+import json
 import asyncio
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from fastapi import FastAPI, Request, HTTPException
-from aiogram import Bot, Dispatcher, Router
-from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from gspread import Client, Worksheet
-from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+
+try:
+    from fastapi import FastAPI, Request, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    from aiogram import Bot, Dispatcher, Router
+    from aiogram.filters import Command
+    from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+    from gspread import authorize
+    from oauth2client.service_account import ServiceAccountCredentials
+    print("Все импорты успешны")
+except ImportError as e:
+    print(f"Ошибка импорта: {e}")
+    raise
 
 app = FastAPI(title="OMS Mini App Backend")
 
-# ─── КОНФИГ ─── ВСЕ ИЗМЕНЕНИЯ ТОЛЬКО ЗДЕСЬ
-BOT_TOKEN = "8270215421:AAFkXC5SUASL5EtcxFLDTF0Ez04CvRlRnxw"  # ← твой токен
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit?gid=0#gid=0/edit"  # ← URL твоей таблицы
-CREDENTIALS_FILE = "credentials.json"  # положи файл рядом с main.py
-SUPPORT_USERNAME = "dimaaaaaaaaaaa_bot"  # ← без @
+# Конфиг
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "твой_токен_для_теста"
+SUPPORT_USERNAME = "kmdkdooo"
 
-bot = Bot(token=BOT_TOKEN)
-router = Router()
-
-# Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
-gc = gspread.authorize(creds)
-worksheet = gc.open_by_url(SHEET_URL).sheet1
+# CORS (чтобы Mini App мог слать запросы)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # для теста — потом можно ограничить
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def root():
-    return {"message": "OMS Mini App Backend работает. Отправь /start боту в Telegram."}
+    return {"message": "OMS Mini App Backend работает"}
 
 @app.post("/submit")
-async def submit_form(request: Request):
+async def submit(request: Request):
     try:
         data = await request.json()
+        print("Получены данные:", data)  # для логов Vercel
 
-        row = [
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            data.get("userId", ""),
-            data.get("username", ""),
-            data.get("gender", ""),
-            data.get("name", ""),
-            data.get("polis", ""),
-            f"{data.get('documentType', '')} {data.get('documentNumber', '')}",
-            data.get("phone", "")
-        ]
-
-        worksheet.append_row(row)
-
-        # Опционально — уведомление в группу
-        # await bot.send_message(GROUP_ID, f"Новая регистрация: {data.get('name')}")
-
-        return {"status": "success"}
+        # Запись в таблицу (пока заглушка — потом добавим gspread)
+        return {"status": "success", "message": "Данные получены (таблица пока отключена для теста)"}
     except Exception as e:
-        print("Ошибка:", e)
-        raise HTTPException(status_code=500, detail="Ошибка сервера")
+        print("Ошибка в /submit:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.message(Command("start"))
 async def start(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="Открыть анкету ОМС",
-            web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app/")  # ← локальный адрес твоего фронтенда
+            web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app")  # твой URL фронтенда
         )
     ]])
 
     await message.answer(
         "👋 Добро пожаловать в ОМС Онлайн!\n\n"
         "Нажмите кнопку ниже, чтобы заполнить анкету.",
-        reply_markup=kb,
-        parse_mode="HTML"
+        reply_markup=kb
     )
 
 dp = Dispatcher()
 dp.include_router(router)
 
-# Запуск бота в отдельном потоке (чтобы FastAPI работал параллельно)
 async def run_bot():
+    bot = Bot(token=BOT_TOKEN)
     await dp.start_polling(bot)
 
 @app.on_event("startup")
