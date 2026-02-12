@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-# Импорты для Google Sheets
+# Google Sheets
 from gspread import authorize
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -17,45 +17,44 @@ print("Начало запуска main.py")
 
 app = FastAPI(title="OMS Mini App Backend")
 
-# CORS — разрешаем запросы из Mini App
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # для теста — потом можно ограничить
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Конфиг
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    print("ВНИМАНИЕ: BOT_TOKEN не найден! Использую заглушку (бот не запустится).")
-    BOT_TOKEN = "твой_токен_для_теста_локально"
+    print("BOT_TOKEN не найден! Использую заглушку.")
+    BOT_TOKEN = "твой_токен_для_теста"
 
 SUPPORT_USERNAME = "kmdkdooo"
 
-# Google Sheets — инициализация
+# Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 worksheet = None
 
 try:
     google_credentials_str = os.getenv("GOOGLE_CREDENTIALS")
     if not google_credentials_str:
-        print("GOOGLE_CREDENTIALS не найдена в переменных окружения!")
-        raise ValueError("Нет GOOGLE_CREDENTIALS")
+        raise ValueError("GOOGLE_CREDENTIALS не найдена")
 
     google_credentials = json.loads(google_credentials_str)
     creds = ServiceAccountCredentials.from_json_keyfile_dict(google_credentials, scope)
     gc = authorize(creds)
 
-    SHEET_URL = "https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit?gid=0#gid=0/edit"  # ← вставь свой реальный URL таблицы
-    worksheet = gc.open_by_url(SHEET_URL).sheet1
+    SHEET_URL = "https://docs.google.com/spreadsheets/d/ТВОЙ_ID_ТАБЛИЦЫ/edit"  # ← ОБЯЗАТЕЛЬНО вставь свой реальный URL!
+    spreadsheet = gc.open_by_url(SHEET_URL)
+    worksheet = spreadsheet.sheet1
     print("Google Sheets успешно подключён")
+    print(f"Название таблицы: {spreadsheet.title}")
+    print(f"Количество строк: {worksheet.row_count}")
 except Exception as e:
-    print(f"Ошибка подключения к Google Sheets: {e}")
-    # Не крашим приложение, просто отключаем запись
+    print(f"Ошибка подключения к Google Sheets: {str(e)}")
+    worksheet = None
 
-# Router для бота
 router = Router()
 
 @router.message(Command("start"))
@@ -64,7 +63,7 @@ async def start(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="Открыть анкету ОМС",
-            web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app")  # ← твой URL фронтенда
+            web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app")
         )
     ]])
 
@@ -74,7 +73,6 @@ async def start(message: Message):
         reply_markup=kb
     )
 
-# Подключаем router
 dp = Dispatcher()
 dp.include_router(router)
 
@@ -92,7 +90,7 @@ async def root():
 async def submit(request: Request):
     try:
         data = await request.json()
-        print("Получены данные в /submit:", data)
+        print("Получены данные в /submit:", json.dumps(data, ensure_ascii=False, indent=2))
 
         row = [
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -107,15 +105,16 @@ async def submit(request: Request):
         print("Строка для записи:", row)
 
         if worksheet is None:
-            print("Таблица не подключена — запись пропущена")
-        else:
-            worksheet.append_row(row)
-            print("Данные успешно записаны в таблицу!")
+            print("Таблица НЕ подключена — запись пропущена")
+            return {"status": "success", "message": "Данные получены, но таблица отключена"}
+
+        worksheet.append_row(row)
+        print("Данные успешно записаны в таблицу! Строк теперь:", worksheet.row_count)
 
         return {"status": "success"}
     except Exception as e:
-        print(f"Критическая ошибка в /submit: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Критическая ошибка в /submit: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
 @app.on_event("startup")
 async def startup():
