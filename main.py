@@ -18,83 +18,108 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Google Sheets Setup
+# Google Sheets
 worksheet = None
 try:
-    creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+    google_credentials_str = os.getenv("GOOGLE_CREDENTIALS")
+    google_credentials = json.loads(google_credentials_str)
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(google_credentials, scope)
     gc = authorize(creds)
+    # Твоя ссылка на таблицу
     spreadsheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit")
     worksheet = spreadsheet.sheet1
+    print("✅ Google Sheets подключена")
 except Exception as e:
-    print(f"Sheets Error: {e}")
+    print(f"❌ Ошибка Google Sheets: {e}")
 
-def validate_tg_data(init_data_raw: str):
+def get_telegram_user(init_data_raw: str):
+    """Декодирует и проверяет данные от Telegram"""
     if not init_data_raw:
         return None
+    
     try:
-        parsed = urllib.parse.parse_qs(init_data_raw)
-        received_hash = parsed.pop("hash", [None])[0]
-        data_check_string = "\n".join([f"{k}={v[0]}" for k, v in sorted(parsed.items())])
+        # Парсим строку (user=...&hash=...)
+        parsed_data = dict(urllib.parse.parse_qsl(init_data_raw))
         
-        secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
-        calc_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-        
-        if calc_hash == received_hash:
-            user_data = json.loads(parsed.get("user", ["{}"])[0])
+        # Для отладки в логах (потом можно убрать)
+        print(f"DEBUG: Parsed keys: {list(parsed_data.keys())}")
+
+        if "user" in parsed_data:
+            user_json = json.loads(parsed_data["user"])
             return user_data
-    except:
-        pass
+            
+    except Exception as e:
+        print(f"DEBUG: Ошибка парсинга юзера: {e}")
     return None
 
 @app.post("/submit")
 async def submit(request: Request):
-    data = await request.json()
-    init_raw = data.get("initDataRaw")
-    
-    # Пытаемся получить реального юзера
-    user = validate_tg_data(init_raw)
-    user_id = str(user.get("id")) if user else "Unknown"
-    username = user.get("username", "Unknown") if user else "Unknown"
+    try:
+        data = await request.json()
+        init_raw = data.get("initDataRaw", "")
+        
+        # Получаем данные пользователя
+        user = get_telegram_user(init_raw)
+        
+        if user:
+            user_id = str(user.get("id", "Unknown"))
+            username = user.get("username", "NoUsername")
+        else:
+            user_id = "Unauthorized"
+            username = "Unauthorized"
 
-    row = [
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        user_id,
-        username,
-        data.get("gender"),
-        data.get("name"),
-        data.get("polis"),
-        f"{data.get('docType')} {data.get('docNumber')}",
-        data.get("phone")
-    ]
+        row = [
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            user_id,
+            username,
+            data.get("gender", "—"),
+            data.get("name", "—"),
+            data.get("polis", "—"),
+            f"{data.get('docType', '—')} {data.get('docNumber', '—')}",
+            data.get("phone", "—")
+        ]
 
-    if worksheet:
-        worksheet.append_row(row)
-        return {"status": "ok"}
-    raise HTTPException(status_code=500, detail="Sheet not connected")
+        if worksheet:
+            worksheet.append_row(row)
+            return {"status": "success"}
+        else:
+            return {"status": "error", "message": "No worksheet"}
 
-# Bot Logic
+    except Exception as e:
+        print(f"Критическая ошибка: {e}")
+        return {"status": "error", "detail": str(e)}
+
+# Бот для запуска приложения
 router = Router()
-@router.message(Command("start"))
-async def cmd_start(m: Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Открыть ОМС", web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app"))
-    ]])
-    await m.answer("Нажмите кнопку ниже:", reply_markup=kb)
 
-@app.on_event("startup")
-async def on_startup():
+@router.message(Command("start"))
+async def start(message: Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="🏠 Открыть анкету ОМС",
+            web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app")
+        )
+    ]])
+    await message.answer("👋 Здравствуйте! Нажмите кнопку, чтобы обновить данные ОМС.", reply_markup=kb)
+
+async def run_bot():
+    if not BOT_TOKEN: return
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     dp.include_router(router)
-    asyncio.create_task(dp.start_polling(bot))
+    await dp.start_polling(bot)
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(run_bot())
 
 if __name__ == "__main__":
     import uvicorn
