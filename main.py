@@ -31,10 +31,9 @@ app.add_middleware(
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    print("BOT_TOKEN не найден → бот не запустится")
-    BOT_TOKEN = None
+    print("BOT_TOKEN не найден в переменных окружения!")
 
-# Google Sheets подключение (твой код без изменений)
+# Google Sheets
 worksheet = None
 try:
     google_credentials_str = os.getenv("GOOGLE_CREDENTIALS")
@@ -47,36 +46,30 @@ try:
     SHEET_URL = "https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit?gid=0"
     spreadsheet = gc.open_by_url(SHEET_URL)
     worksheet = spreadsheet.sheet1
-    print(f"Google Sheets: {spreadsheet.title} | строк: {worksheet.row_count}")
+    print("Google Sheets подключена")
 except Exception as e:
-    print(f"Ошибка Google Sheets: {e}")
+    print(f"Ошибка подключения Google Sheets: {str(e)}")
     worksheet = None
 
-# ─── Валидация initData (самое важное добавление) ───────────────────────────────
-def validate_and_extract_user(init_data_raw: str, bot_token: str) -> dict:
+# ─── Валидация initData ────────────────────────────────────────────────
+def validate_and_extract_user(init_data_raw: str, bot_token: str):
     if not init_data_raw or not bot_token:
-        return {"valid": False, "user_id": None, "username": None, "error": "Нет данных или токена"}
+        return {"valid": False, "user_id": None, "username": None, "error": "Нет initData или токена"}
 
     parsed = urllib.parse.parse_qs(init_data_raw)
     received_hash = parsed.pop("hash", [None])[0]
     if not received_hash:
-        return {"valid": False, "error": "Нет hash"}
+        return {"valid": False, "error": "Отсутствует hash"}
 
-    # Формируем data_check_string
-    data_check_arr = []
-    for k in sorted(parsed):
-        for v in parsed[k]:
-            data_check_arr.append(f"{k}={v}")
+    data_check_arr = [f"{k}={v[0]}" for k, v in sorted(parsed.items())]
     data_check_string = "\n".join(data_check_arr)
 
-    # secret_key = HMAC_SHA256("WebAppData", bot_token)
     secret_key = hmac.new(
         key=b"WebAppData",
         msg=bot_token.encode(),
         digestmod=hashlib.sha256
     ).digest()
 
-    # calculated_hash = HMAC_SHA256(secret_key, data_check_string)
     calculated_hash = hmac.new(
         key=secret_key,
         msg=data_check_string.encode(),
@@ -86,23 +79,18 @@ def validate_and_extract_user(init_data_raw: str, bot_token: str) -> dict:
     if calculated_hash != received_hash:
         return {"valid": False, "error": "Неверная подпись"}
 
-    # Достаём user
-    user_json = parsed.get("user", [None])[0]
-    user = None
-    if user_json:
+    user_str = parsed.get("user", [None])[0]
+    if user_str:
         try:
-            user = json.loads(user_json)
-        except:
+            user = json.loads(user_str)
+            if "id" in user:
+                return {
+                    "valid": True,
+                    "user_id": str(user["id"]),
+                    "username": user.get("username") or "no_username",
+                }
+        except Exception:
             pass
-
-    if user and "id" in user:
-        return {
-            "valid": True,
-            "user_id": str(user["id"]),
-            "username": user.get("username") or "no-username",
-            "first_name": user.get("first_name", ""),
-            "last_name": user.get("last_name", ""),
-        }
 
     return {"valid": True, "user_id": None, "username": None}
 
@@ -117,9 +105,9 @@ async def start(message: Message):
             web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app")
         )
     ]])
-
     await message.answer(
-        "👋 Добро пожаловать в ОМС Онлайн!\n\nНажмите кнопку ниже, чтобы заполнить анкету.",
+        "👋 Добро пожаловать в ОМС Онлайн!\n\n"
+        "Нажмите кнопку ниже, чтобы заполнить анкету.",
         reply_markup=kb
     )
 
@@ -128,10 +116,10 @@ dp.include_router(router)
 
 async def run_bot():
     if not BOT_TOKEN:
-        print("BOT_TOKEN отсутствует → бот не запущен")
+        print("Бот не запущен — BOT_TOKEN отсутствует")
         return
     bot = Bot(token=BOT_TOKEN)
-    print("Бот запущен (polling)")
+    print("Бот запущен, polling...")
     await dp.start_polling(bot)
 
 # ─── Эндпоинты ──────────────────────────────────────────────────────────
@@ -145,15 +133,12 @@ async def submit(request: Request):
         data = await request.json()
         print("Получены данные:", json.dumps(data, ensure_ascii=False, indent=2))
 
-        # Валидация initData
+        # Пытаемся получить реальные данные через валидацию
         init_data_raw = data.get("initDataRaw", "")
         validation = validate_and_extract_user(init_data_raw, BOT_TOKEN)
 
-        user_id = validation.get("user_id") or data.get("userId", "—")
-        username = validation.get("username") or data.get("username", "—")
-
-        if not validation["valid"]:
-            print(f"Валидация initData НЕ ПРОШЛА: {validation.get('error')}")
+        user_id = validation.get("user_id") or data.get("userId", "unknown")
+        username = validation.get("username") or data.get("username", "unknown")
 
         row = [
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -163,19 +148,19 @@ async def submit(request: Request):
             data.get("name", "—"),
             data.get("polis", "—"),
             f"{data.get('docType', '—')} {data.get('docNumber', '—')}",
-            data.get("phone", "—"),
+            data.get("phone", "—")
         ]
 
         if worksheet:
             worksheet.append_row(row)
-            print(f"Записано в таблицу. Строк: {worksheet.row_count}")
+            print("Данные записаны в таблицу")
         else:
-            print("Google Sheets НЕ подключена")
+            print("Таблица НЕ подключена — запись пропущена")
 
-        return {"status": "success", "validated_user_id": user_id}
+        return {"status": "success"}
 
     except Exception as e:
-        print(f"Ошибка в /submit: {e}")
+        print(f"Ошибка в /submit: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.on_event("startup")
@@ -185,5 +170,6 @@ async def startup():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
