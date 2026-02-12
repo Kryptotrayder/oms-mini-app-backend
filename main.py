@@ -10,162 +10,91 @@ from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-
-# Google Sheets
 from gspread import authorize
 from oauth2client.service_account import ServiceAccountCredentials
 
-print("Начало запуска main.py")
-
-app = FastAPI(title="OMS Mini App Backend")
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
-    expose_headers=["*"],
-    max_age=600,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    print("BOT_TOKEN не найден в переменных окружения!")
 
-# Google Sheets
+# Google Sheets Setup
 worksheet = None
 try:
-    google_credentials_str = os.getenv("GOOGLE_CREDENTIALS")
-    if not google_credentials_str:
-        raise ValueError("GOOGLE_CREDENTIALS не найдена")
-    google_credentials = json.loads(google_credentials_str)
+    creds_json = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(google_credentials, scope)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
     gc = authorize(creds)
-    SHEET_URL = "https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit?gid=0"
-    spreadsheet = gc.open_by_url(SHEET_URL)
+    spreadsheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit")
     worksheet = spreadsheet.sheet1
-    print("Google Sheets подключена")
 except Exception as e:
-    print(f"Ошибка подключения Google Sheets: {str(e)}")
-    worksheet = None
+    print(f"Sheets Error: {e}")
 
-# ─── Валидация initData ────────────────────────────────────────────────
-def validate_and_extract_user(init_data_raw: str, bot_token: str):
-    if not init_data_raw or not bot_token:
-        return {"valid": False, "user_id": None, "username": None, "error": "Нет initData или токена"}
-
-    parsed = urllib.parse.parse_qs(init_data_raw)
-    received_hash = parsed.pop("hash", [None])[0]
-    if not received_hash:
-        return {"valid": False, "error": "Отсутствует hash"}
-
-    data_check_arr = [f"{k}={v[0]}" for k, v in sorted(parsed.items())]
-    data_check_string = "\n".join(data_check_arr)
-
-    secret_key = hmac.new(
-        key=b"WebAppData",
-        msg=bot_token.encode(),
-        digestmod=hashlib.sha256
-    ).digest()
-
-    calculated_hash = hmac.new(
-        key=secret_key,
-        msg=data_check_string.encode(),
-        digestmod=hashlib.sha256
-    ).hexdigest()
-
-    if calculated_hash != received_hash:
-        return {"valid": False, "error": "Неверная подпись"}
-
-    user_str = parsed.get("user", [None])[0]
-    if user_str:
-        try:
-            user = json.loads(user_str)
-            if "id" in user:
-                return {
-                    "valid": True,
-                    "user_id": str(user["id"]),
-                    "username": user.get("username") or "no_username",
-                }
-        except Exception:
-            pass
-
-    return {"valid": True, "user_id": None, "username": None}
-
-# ─── Бот ────────────────────────────────────────────────────────────────
-router = Router()
-
-@router.message(Command("start"))
-async def start(message: Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="Открыть анкету ОМС",
-            web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app")
-        )
-    ]])
-    await message.answer(
-        "👋 Добро пожаловать в ОМС Онлайн!\n\n"
-        "Нажмите кнопку ниже, чтобы заполнить анкету.",
-        reply_markup=kb
-    )
-
-dp = Dispatcher()
-dp.include_router(router)
-
-async def run_bot():
-    if not BOT_TOKEN:
-        print("Бот не запущен — BOT_TOKEN отсутствует")
-        return
-    bot = Bot(token=BOT_TOKEN)
-    print("Бот запущен, polling...")
-    await dp.start_polling(bot)
-
-# ─── Эндпоинты ──────────────────────────────────────────────────────────
-@app.get("/")
-async def root():
-    return {"message": "OMS Mini App Backend работает"}
+def validate_tg_data(init_data_raw: str):
+    if not init_data_raw:
+        return None
+    try:
+        parsed = urllib.parse.parse_qs(init_data_raw)
+        received_hash = parsed.pop("hash", [None])[0]
+        data_check_string = "\n".join([f"{k}={v[0]}" for k, v in sorted(parsed.items())])
+        
+        secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        calc_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        
+        if calc_hash == received_hash:
+            user_data = json.loads(parsed.get("user", ["{}"])[0])
+            return user_data
+    except:
+        pass
+    return None
 
 @app.post("/submit")
 async def submit(request: Request):
-    try:
-        data = await request.json()
-        print("Получены данные:", json.dumps(data, ensure_ascii=False, indent=2))
+    data = await request.json()
+    init_raw = data.get("initDataRaw")
+    
+    # Пытаемся получить реального юзера
+    user = validate_tg_data(init_raw)
+    user_id = str(user.get("id")) if user else "Unknown"
+    username = user.get("username", "Unknown") if user else "Unknown"
 
-        # Пытаемся получить реальные данные через валидацию
-        init_data_raw = data.get("initDataRaw", "")
-        validation = validate_and_extract_user(init_data_raw, BOT_TOKEN)
+    row = [
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        user_id,
+        username,
+        data.get("gender"),
+        data.get("name"),
+        data.get("polis"),
+        f"{data.get('docType')} {data.get('docNumber')}",
+        data.get("phone")
+    ]
 
-        user_id = validation.get("user_id") or data.get("userId", "unknown")
-        username = validation.get("username") or data.get("username", "unknown")
+    if worksheet:
+        worksheet.append_row(row)
+        return {"status": "ok"}
+    raise HTTPException(status_code=500, detail="Sheet not connected")
 
-        row = [
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            user_id,
-            username,
-            data.get("gender", "—"),
-            data.get("name", "—"),
-            data.get("polis", "—"),
-            f"{data.get('docType', '—')} {data.get('docNumber', '—')}",
-            data.get("phone", "—")
-        ]
-
-        if worksheet:
-            worksheet.append_row(row)
-            print("Данные записаны в таблицу")
-        else:
-            print("Таблица НЕ подключена — запись пропущена")
-
-        return {"status": "success"}
-
-    except Exception as e:
-        print(f"Ошибка в /submit: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Bot Logic
+router = Router()
+@router.message(Command("start"))
+async def cmd_start(m: Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Открыть ОМС", web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app"))
+    ]])
+    await m.answer("Нажмите кнопку ниже:", reply_markup=kb)
 
 @app.on_event("startup")
-async def startup():
-    asyncio.create_task(run_bot())
+async def on_startup():
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher()
+    dp.include_router(router)
+    asyncio.create_task(dp.start_polling(bot))
 
 if __name__ == "__main__":
     import uvicorn
