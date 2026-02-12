@@ -41,23 +41,16 @@ except Exception as e:
     print(f"❌ Ошибка Google Sheets: {e}")
 
 def get_telegram_user(init_data_raw: str):
-    """Декодирует и проверяет данные от Telegram"""
     if not init_data_raw:
         return None
-    
     try:
-        # Парсим строку (user=...&hash=...)
         parsed_data = dict(urllib.parse.parse_qsl(init_data_raw))
-        
-        # Для отладки в логах (потом можно убрать)
-        print(f"DEBUG: Parsed keys: {list(parsed_data.keys())}")
-
         if "user" in parsed_data:
+            # Вот здесь убедись, что переменная совпадает:
             user_json = json.loads(parsed_data["user"])
-            return user_data
-            
+            return user_json # <--- должно быть так
     except Exception as e:
-        print(f"DEBUG: Ошибка парсинга юзера: {e}")
+        print(f"DEBUG: Ошибка парсинга: {e}")
     return None
 
 @app.post("/submit")
@@ -124,6 +117,7 @@ async def startup():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
