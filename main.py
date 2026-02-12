@@ -48,7 +48,7 @@ try:
     creds = ServiceAccountCredentials.from_json_keyfile_dict(google_credentials, scope)
     gc = authorize(creds)
 
-    SHEET_URL = "https://docs.google.com/spreadsheets/d/ТВОЙ_ID_ТАБЛИЦЫ/edit"  # ← вставь свой реальный URL таблицы
+    SHEET_URL = "https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit?gid=0#gid=0/edit"  # ← вставь свой реальный URL таблицы
     worksheet = gc.open_by_url(SHEET_URL).sheet1
     print("Google Sheets успешно подключён")
 except Exception as e:
@@ -126,3 +126,4 @@ if __name__ == "__main__":
     import uvicorn
     print("Запускаем uvicorn...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
