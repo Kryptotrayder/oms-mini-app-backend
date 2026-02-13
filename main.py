@@ -125,13 +125,7 @@ async def submit(request: Request):
             
     return {"status": "error"}
 
-async def start_handler(message: Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="🏠 Открыть анкету ОМС", 
-            web_app=WebAppInfo(url="https://oms-mini-app-frontend.vercel.app")
-        )
-    ]])
+
     await message.answer("👋 Здравствуйте! Нажмите кнопку, чтобы обновить данные ОМС.", reply_markup=kb)
 
 @app.on_event("startup")
@@ -154,6 +148,7 @@ async def startup():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
