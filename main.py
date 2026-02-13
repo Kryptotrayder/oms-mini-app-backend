@@ -106,6 +106,7 @@ async def submit(request: Request):
                 "bot1": {"red": 0.8, "green": 0.9, "blue": 1.0},
                 "bot2": {"red": 1.0, "green": 0.85, "blue": 0.85},
                 "bot3": {"red": 0.85, "green": 1.0, "blue": 0.85},
+                "bot4": {"red": 1.0, "green": 1.0, "blue": 0.7},
             }
             bg_color = color_map.get(bot_label, {"red": 0.95, "green": 0.95, "blue": 0.95})
             
@@ -143,6 +144,7 @@ async def startup():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
