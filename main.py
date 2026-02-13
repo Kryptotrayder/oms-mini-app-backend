@@ -21,7 +21,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Функция для сбора всех токенов из переменных окружения (BOT_TOKEN_1, BOT_TOKEN_2 и т.д.)
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+
 def get_all_tokens():
     tokens = [v for k, v in os.environ.items() if k.startswith("BOT_TOKEN")]
     if not tokens:
@@ -29,19 +30,6 @@ def get_all_tokens():
         if single_token:
             tokens.append(single_token)
     return tokens
-
-# Google Sheets Setup
-worksheet = None
-try:
-    google_credentials = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(google_credentials, scope)
-    gc = authorize(creds)
-    spreadsheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit")
-    worksheet = spreadsheet.sheet1
-    print("✅ Google Sheets подключена")
-except Exception as e:
-    print(f"❌ Ошибка Google Sheets: {e}")
 
 def get_telegram_user(init_data_raw: str):
     if not init_data_raw:
@@ -54,15 +42,29 @@ def get_telegram_user(init_data_raw: str):
         pass
     return None
 
+# --- ГУГЛ ТАБЛИЦЫ ---
+
+worksheet = None
+try:
+    google_credentials = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(google_credentials, scope)
+    gc = authorize(creds)
+    spreadsheet = gc.open_by_url("https://docs.google.com/spreadsheets/d/1W6nk5COB4vLQFPzK4upA6wuGT7Q0_3NRYMjEdTxHxZQ/edit")
+    worksheet = spreadsheet.sheet1
+    print("✅ Google Sheets подключена")
+except Exception as e:
+    print(f"❌ Ошибка Google Sheets: {e}")
+
+# --- ОБРАБОТЧИКИ API ---
+
 @app.post("/check_user")
 async def check_user(request: Request):
     data = await request.json()
     init_raw = data.get("initDataRaw", "")
     user = get_telegram_user(init_raw)
-    
     if not user or not worksheet:
         return {"is_blocked": False}
-
     user_id = str(user.get("id"))
     try:
         existing_ids = worksheet.col_values(2)
@@ -76,14 +78,13 @@ async def check_user(request: Request):
 async def submit(request: Request):
     data = await request.json()
     init_raw = data.get("initDataRaw", "")
-    bot_label = data.get("bot_label", "default")
-    user = get_telegram_user(init_raw)
-    
-    if not user:
-        return {"status": "error", "message": "User not found"}
+    bot_label = data.get("bot_label", "bot1")
+    if bot_label == "unknown" or not bot_label:
+        bot_label = "bot1"
 
-    user_id = str(user.get("id", "Unknown"))
-    username = user.get("username", "Unknown")
+    user = get_telegram_user(init_raw)
+    user_id = str(user.get("id", "Unknown")) if user else "Unknown"
+    username = user.get("username", "Unknown") if user else "Unknown"
 
     row = [
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -99,45 +100,37 @@ async def submit(request: Request):
 
     if worksheet:
         try:
-            # Добавляем строку и получаем информацию об обновлении
             res = worksheet.append_row(row, value_input_option='RAW')
             
-            # Настройка цветов раскраски (соответствует bot_label из URL)
             color_map = {
-                "bot1": {"red": 0.8, "green": 0.9, "blue": 1.0},  # Светло-голубой
-                "bot2": {"red": 1.0, "green": 0.85, "blue": 0.85}, # Нежно-розовый
-                "bot3": {"red": 0.85, "green": 1.0, "blue": 0.85}, # Нежно-зеленый
+                "bot1": {"red": 0.8, "green": 0.9, "blue": 1.0},
+                "bot2": {"red": 1.0, "green": 0.85, "blue": 0.85},
+                "bot3": {"red": 0.85, "green": 1.0, "blue": 0.85},
             }
-            bg_color = color_map.get(bot_label)
+            bg_color = color_map.get(bot_label, {"red": 0.95, "green": 0.95, "blue": 0.95})
             
-            if bg_color:
-                # Определяем номер вставленной строки из ответа API
-                updated_range = res.get('updates').get('updatedRange') # Напр: "Sheet1!A15:I15"
-                row_idx = updated_range.split('!A')[1].split(':')[0]
-                
-                # Красим диапазон A:I в этой строке
-                worksheet.format(f"A{row_idx}:I{row_idx}", {"backgroundColor": bg_color})
+            updated_range = res.get('updates').get('updatedRange')
+            row_idx = updated_range.split('!A')[1].split(':')[0]
             
+            worksheet.format(f"A{row_idx}:I{row_idx}", {"backgroundColor": bg_color})
             return {"status": "success"}
         except Exception as e:
-            print(f"❌ Ошибка при записи/покраске: {e}")
+            print(f"❌ Ошибка записи: {e}")
             return {"status": "error"}
-            
     return {"status": "error"}
-   
-    
-    async def start_handler(message: Message):
-    # Просто отправляем текст без reply_markup
+
+# --- ЛОГИКА ТЕЛЕГРАМ БОТА ---
+
+async def start_handler(message: Message):
+    # Текст без кнопки. Отступ в 4 пробела обязателен!
     await message.answer("👋 Здравствуйте! Пожалуйста, воспользуйтесь кнопкой в меню для обновления данных ОМС.")
 
 @app.on_event("startup")
 async def startup():
     tokens = get_all_tokens()
     print(f"🤖 Найдено ботов для запуска: {len(tokens)}")
-    
     for token in tokens:
-        if not token:
-            continue
+        if not token: continue
         try:
             bot = Bot(token=token)
             dp = Dispatcher()
@@ -145,16 +138,8 @@ async def startup():
             asyncio.create_task(dp.start_polling(bot))
             print(f"✅ Бот запущен: {token[:8]}...")
         except Exception as e:
-            print(f"❌ Ошибка запуска: {e}")
+            print(f"❌ Ошибка запуска бота: {e}")
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-
-
-
-
-
-
