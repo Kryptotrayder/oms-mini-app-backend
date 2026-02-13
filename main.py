@@ -124,9 +124,11 @@ async def submit(request: Request):
             return {"status": "error"}
             
     return {"status": "error"}
-
-
-    await message.answer("👋 Здравствуйте! Нажмите кнопку, чтобы обновить данные ОМС.", reply_markup=kb)
+   
+    
+    async def start_handler(message: Message):
+    # Просто отправляем текст без reply_markup
+    await message.answer("👋 Здравствуйте! Пожалуйста, воспользуйтесь кнопкой в меню для обновления данных ОМС.")
 
 @app.on_event("startup")
 async def startup():
@@ -148,6 +150,7 @@ async def startup():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
