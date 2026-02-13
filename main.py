@@ -1,11 +1,9 @@
 import os
 import json
 import asyncio
-import hmac
-import hashlib
 import urllib.parse
 from datetime import datetime
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command
@@ -44,10 +42,9 @@ def get_telegram_user(init_data_raw: str):
     try:
         parsed_data = dict(urllib.parse.parse_qsl(init_data_raw))
         if "user" in parsed_data:
-            user_json = json.loads(parsed_data["user"])
-            return user_json
-    except Exception as e:
-        print(f"DEBUG: Ошибка парсинга: {e}")
+            return json.loads(parsed_data["user"])
+    except:
+        pass
     return None
 
 @app.post("/check_user")
@@ -61,7 +58,7 @@ async def check_user(request: Request):
 
     user_id = str(user.get("id"))
     try:
-        # Проверяем второй столбец (где хранится user_id)
+        # Проверяем наличие ID во втором столбце
         existing_ids = worksheet.col_values(2)
         if user_id in existing_ids:
             return {"is_blocked": True}
@@ -75,8 +72,8 @@ async def submit(request: Request):
     init_raw = data.get("initDataRaw", "")
     user = get_telegram_user(init_raw)
     
-    user_id = str(user.get("id", "Unknown")) if user else "Unauthorized"
-    username = user.get("username", "Unknown") if user else "Unauthorized"
+    user_id = str(user.get("id", "Unknown"))
+    username = user.get("username", "Unknown")
 
     row = [
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
