@@ -24,7 +24,6 @@ app.add_middleware(
 # Функция для сбора всех токенов из переменных окружения (BOT_TOKEN_1, BOT_TOKEN_2 и т.д.)
 def get_all_tokens():
     tokens = [v for k, v in os.environ.items() if k.startswith("BOT_TOKEN")]
-    # Если специфичных переменных нет, берем стандартный BOT_TOKEN
     if not tokens:
         single_token = os.getenv("BOT_TOKEN")
         if single_token:
@@ -66,7 +65,6 @@ async def check_user(request: Request):
 
     user_id = str(user.get("id"))
     try:
-        # Проверяем наличие ID во втором столбце таблицы
         existing_ids = worksheet.col_values(2)
         if user_id in existing_ids:
             return {"is_blocked": True}
@@ -101,29 +99,32 @@ async def submit(request: Request):
 
     if worksheet:
         try:
-            # Добавляем строку
-            worksheet.append_row(row)
+            # Добавляем строку и получаем информацию об обновлении
+            res = worksheet.append_row(row, value_input_option='RAW')
             
-            # Настройка цветов раскраски для разных ботов (RGB от 0 до 1)
+            # Настройка цветов раскраски (соответствует bot_label из URL)
             color_map = {
-                "bot1": {"red": 0.9, "green": 0.95, "blue": 1.0},  # Нежно-голубой
-                "bot2": {"red": 1.0, "green": 0.9, "blue": 0.9},   # Нежно-розовый
-                "bot3": {"red": 0.9, "green": 1.0, "blue": 0.9},   # Нежно-зеленый
+                "bot1": {"red": 0.8, "green": 0.9, "blue": 1.0},  # Светло-голубой
+                "bot2": {"red": 1.0, "green": 0.85, "blue": 0.85}, # Нежно-розовый
+                "bot3": {"red": 0.85, "green": 1.0, "blue": 0.85}, # Нежно-зеленый
             }
-            bg_color = color_map.get(bot_label, {"red": 1.0, "green": 1.0, "blue": 1.0})
+            bg_color = color_map.get(bot_label)
             
-            # Получаем индекс последней строки и красим её
-            last_row_idx = len(worksheet.get_all_values())
-            worksheet.format(f"A{last_row_idx}:I{last_row_idx}", {"backgroundColor": bg_color})
+            if bg_color:
+                # Определяем номер вставленной строки из ответа API
+                updated_range = res.get('updates').get('updatedRange') # Напр: "Sheet1!A15:I15"
+                row_idx = updated_range.split('!A')[1].split(':')[0]
+                
+                # Красим диапазон A:I в этой строке
+                worksheet.format(f"A{row_idx}:I{row_idx}", {"backgroundColor": bg_color})
             
             return {"status": "success"}
         except Exception as e:
-            print(f"❌ Ошибка при записи в таблицу: {e}")
+            print(f"❌ Ошибка при записи/покраске: {e}")
             return {"status": "error"}
             
     return {"status": "error"}
 
-# Обработчик команды /start (вынесен в функцию для регистрации в каждом боте)
 async def start_handler(message: Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
@@ -144,15 +145,11 @@ async def startup():
         try:
             bot = Bot(token=token)
             dp = Dispatcher()
-            
-            # Регистрируем обработчик напрямую в диспетчере каждого бота
             dp.message.register(start_handler, Command("start"))
-            
-            # Запускаем поллинг для каждого бота как отдельную задачу
             asyncio.create_task(dp.start_polling(bot))
-            print(f"✅ Бот успешно запущен (токен начинается на {token[:8]}...)")
+            print(f"✅ Бот запущен: {token[:8]}...")
         except Exception as e:
-            print(f"❌ Ошибка при инициализации бота: {e}")
+            print(f"❌ Ошибка запуска: {e}")
 
 if __name__ == "__main__":
     import uvicorn
