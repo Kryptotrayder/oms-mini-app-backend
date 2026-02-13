@@ -21,7 +21,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Функция для сбора всех токенов из переменных окружения
+def get_all_tokens():
+    tokens = [v for k, v in os.environ.items() if k.startswith("BOT_TOKEN")]
+    return tokens if tokens else [os.getenv("BOT_TOKEN")]
 
 # Google Sheets Setup
 worksheet = None
@@ -58,7 +61,6 @@ async def check_user(request: Request):
 
     user_id = str(user.get("id"))
     try:
-        # Проверяем наличие ID во втором столбце
         existing_ids = worksheet.col_values(2)
         if user_id in existing_ids:
             return {"is_blocked": True}
@@ -70,6 +72,7 @@ async def check_user(request: Request):
 async def submit(request: Request):
     data = await request.json()
     init_raw = data.get("initDataRaw", "")
+    bot_label = data.get("bot_label", "default")
     user = get_telegram_user(init_raw)
     
     user_id = str(user.get("id", "Unknown"))
@@ -83,11 +86,27 @@ async def submit(request: Request):
         data.get("name", "—"),
         data.get("polis", "—"),
         f"{data.get('docType', '—')} {data.get('docNumber', '—')}",
-        data.get("phone", "—")
+        data.get("phone", "—"),
+        bot_label
     ]
 
     if worksheet:
         worksheet.append_row(row)
+        
+        # Логика раскраски
+        color_map = {
+            "bot1": {"red": 0.9, "green": 0.95, "blue": 1.0},  # Голубой
+            "bot2": {"red": 1.0, "green": 0.9, "blue": 0.9},   # Розовый
+            "bot3": {"red": 0.9, "green": 1.0, "blue": 0.9},   # Зеленый
+        }
+        bg_color = color_map.get(bot_label, {"red": 1.0, "green": 1.0, "blue": 1.0})
+        
+        try:
+            last_row = len(worksheet.col_values(1))
+            worksheet.format(f"A{last_row}:I{last_row}", {"backgroundColor": bg_color})
+        except:
+            pass
+
         return {"status": "success"}
     return {"status": "error"}
 
@@ -101,15 +120,18 @@ async def start(message: Message):
 
 @app.on_event("startup")
 async def startup():
-    if BOT_TOKEN:
-        bot = Bot(token=BOT_TOKEN)
-        dp = Dispatcher()
-        dp.include_router(router)
-        asyncio.create_task(dp.start_polling(bot))
+    tokens = get_all_tokens()
+    for token in tokens:
+        if token:
+            bot = Bot(token=token)
+            dp = Dispatcher()
+            dp.include_router(router)
+            asyncio.create_task(dp.start_polling(bot))
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
